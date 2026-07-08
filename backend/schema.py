@@ -278,6 +278,7 @@ class RecruiterQuestion(BaseModel):
 # State management for LangGraph - Base state without messages
 class ApplicationState(TypedDict):
     resume_text: str
+    resume_metadata: Optional[Dict[str, Any]]
     job_description_text: str
     enable_company_search: bool
     company_research: Optional[Dict[str, Any]]
