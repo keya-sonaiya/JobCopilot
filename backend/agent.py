@@ -16,7 +16,7 @@ from schema import (
 )
 
 from company_search import CompanySearcher
-from resume_rag import build_resume_rag_context
+from resume_rag import ResumeRAGConfig, build_resume_rag_context
 from utils import extract_dict_from_json_response
 
 
@@ -28,6 +28,7 @@ class ResumeJobApplicationSystem:
         api_key: Optional[str] = None,
         model: str = "gemma3:27b",
         host: Optional[str] = "http://localhost:11434",
+        rag_config: Optional[ResumeRAGConfig] = None,
     ):
         """
         Initialize the system with Ollama integration via LangGraph
@@ -37,6 +38,7 @@ class ResumeJobApplicationSystem:
             model: Ollama model to use (default: gemma3:27b)
             host: Ollama host/base URL (default: http://localhost:11434)
         """
+        self.rag_config = rag_config or ResumeRAGConfig.from_env()
         client_kwargs = {}
         if api_key:
             client_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
@@ -639,6 +641,7 @@ class ResumeJobApplicationSystem:
 
         try:
             resume_text = state["resume_text"]
+            resume_metadata = state.get("resume_metadata") or {}
             job = state.get("parsed_job_description")
             if not job:
                 raise ValueError("Missing parsed job description")
@@ -652,12 +655,23 @@ class ResumeJobApplicationSystem:
                     *(state.get("recruiter_questions") or []),
                 ]
             )
+            filename = resume_metadata.get("filename") if isinstance(resume_metadata, dict) else None
             state["resume_rag_context"] = build_resume_rag_context(
                 resume_text,
                 [state["job_description_text"], requirement_query],
-                top_k=6,
+                top_k=self.rag_config.top_k,
+                config=self.rag_config,
+                metadata={
+                    "source": filename or "resume",
+                    "doc_id": filename or "resume",
+                },
             )
-            self._emit_progress(state, "resume_rag", "completed", "Relevant resume excerpts retrieved.")
+            self._emit_progress(
+                state,
+                "resume_rag",
+                "completed",
+                f"Relevant resume excerpts retrieved with {self.rag_config.retrieval_mode} mode.",
+            )
         except Exception as e:
             state["resume_rag_context"] = state.get("resume_text", "")[:4000]
             self._emit_progress(state, "resume_rag", "failed", f"RAG fallback used: {e}")
@@ -1271,6 +1285,7 @@ class ResumeJobApplicationSystem:
         job_description_text: str,
         recruiter_questions: Optional[List[str]] = None,
         enable_company_search: bool = True,
+        resume_metadata: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable[[str, str, str], None]] = None,
     ) -> ApplicationResult:
         """Run the complete application process with Ollama and return Pydantic result"""
@@ -1279,6 +1294,7 @@ class ResumeJobApplicationSystem:
 
         initial_state = LangGraphApplicationState(
             resume_text=resume_text,
+            resume_metadata=resume_metadata,
             job_description_text=job_description_text,
             enable_company_search=enable_company_search,
             company_research=None,

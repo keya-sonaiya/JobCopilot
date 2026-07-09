@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from settings import configure_runtime, get_settings, is_remote_ollama_host
 from documents import DocumentExtractionError, extract_resume_text
+from resume_rag import ResumeRAGConfig
 
 
 configure_runtime()
@@ -136,6 +137,17 @@ class ChatResponse(BaseModel):
 @lru_cache(maxsize=1)
 def get_application_system() -> ResumeJobApplicationSystem:
     settings = get_settings()
+    rag_config = ResumeRAGConfig(
+        retrieval_mode=settings.rag_retrieval_mode,
+        fusion_method=settings.rag_fusion_method,
+        fusion_alpha=settings.rag_fusion_alpha,
+        embedding_provider=settings.rag_embedding_provider,
+        embedding_model=settings.rag_embedding_model,
+        top_k=settings.rag_top_k,
+        rrf_k=settings.rag_rrf_k,
+        semantic_pool_factor=settings.rag_semantic_pool_factor,
+        use_faiss=settings.rag_use_faiss,
+    ).normalized()
 
     if is_remote_ollama_host(settings.ollama_host) and not settings.ollama_api_key:
         raise RuntimeError(
@@ -147,6 +159,7 @@ def get_application_system() -> ResumeJobApplicationSystem:
         api_key=settings.ollama_api_key,
         host=settings.ollama_host,
         model=settings.ollama_model,
+        rag_config=rag_config,
     )
 
 
@@ -226,6 +239,7 @@ def run_application_job(
     job_description_text: str,
     recruiter_questions: list[str],
     enable_company_search: bool,
+    resume_file_metadata: dict[str, Any] | None = None,
 ) -> None:
     update_job(job_id, status="running")
 
@@ -236,6 +250,7 @@ def run_application_job(
             job_description_text=job_description_text,
             recruiter_questions=recruiter_questions,
             enable_company_search=enable_company_search,
+            resume_metadata=resume_file_metadata,
             progress_callback=lambda key, status, message: update_step(job_id, key, status, message),
         )
         application_response = build_application_response(result).model_dump(mode="json")
@@ -263,11 +278,20 @@ def build_app() -> FastAPI:
     )
 
     @app.get("/api/health")
-    def health() -> dict[str, str]:
+    def health() -> dict[str, Any]:
         return {
             "status": "ok",
             "model": settings.ollama_model,
             "host": settings.ollama_host,
+            "rag": {
+                "retrieval_mode": settings.rag_retrieval_mode,
+                "fusion_method": settings.rag_fusion_method,
+                "fusion_alpha": settings.rag_fusion_alpha,
+                "embedding_provider": settings.rag_embedding_provider,
+                "embedding_model": settings.rag_embedding_model,
+                "top_k": settings.rag_top_k,
+                "use_faiss": settings.rag_use_faiss,
+            },
         }
 
     @app.post("/api/process", response_model=ApplicationResponse)
@@ -325,7 +349,7 @@ def build_app() -> FastAPI:
 
         thread = Thread(
             target=run_application_job,
-            args=(job_id, resume_text, job_description_text, questions, enable_company_search),
+            args=(job_id, resume_text, job_description_text, questions, enable_company_search, resume_file_metadata),
             daemon=True,
         )
         thread.start()

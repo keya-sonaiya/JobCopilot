@@ -9,7 +9,7 @@ The app is built with a FastAPI backend, a static-export Next.js frontend, LangG
 - Upload PDF, DOCX, or TXT resumes.
 - Paste a job description and generate a complete application package.
 - Parse resume and job description into structured Pydantic models.
-- Retrieve relevant resume excerpts with a local RAG-style index.
+- Retrieve relevant resume excerpts with configurable token, semantic, or hybrid RAG.
 - Search company context from the web and expose source links.
 - Generate a cover letter, skill-match analysis, recruiter answers, and summaries.
 - Continue into chat with application memory and optional web search.
@@ -120,7 +120,7 @@ sequenceDiagram
 | LLM integration | LangChain Ollama |
 | Document parsing | pypdf, python-docx |
 | Company search | httpx, BeautifulSoup, DuckDuckGo HTML results |
-| Resume retrieval | Local token-based chunk scoring |
+| Resume retrieval | Local token, semantic, or hybrid chunk retrieval with RRF/weighted fusion |
 | Package management | venv + pip for Python, npm for frontend |
 
 ## Project Structure
@@ -132,8 +132,9 @@ sequenceDiagram
 |   |-- agent.py              # LangGraph workflow and LLM prompts
 |   |-- company_search.py     # Company/web search helper
 |   |-- documents.py          # PDF, DOCX, and TXT resume extraction
+|   |-- evaluate_retrieval.py # Compare token, semantic, and hybrid retrieval
 |   |-- main.py               # Uvicorn entrypoint
-|   |-- resume_rag.py         # Local resume chunk retrieval
+|   |-- resume_rag.py         # Local/hybrid resume chunk retrieval
 |   |-- schema.py             # Pydantic domain models
 |   |-- server.py             # FastAPI app, job APIs, chat APIs, static serving
 |   |-- settings.py           # Environment loading and Ollama settings
@@ -159,6 +160,26 @@ Create `backend/.env`:
 OLLAMA_API_KEY=
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=gemma3:27b
+```
+
+Hybrid retrieval is configurable through the same file:
+
+```bash
+RAG_RETRIEVAL_MODE=hybrid        # token, semantic, or hybrid
+RAG_FUSION_METHOD=rrf            # rrf or weighted
+RAG_FUSION_ALPHA=0.65            # semantic weight for weighted fusion
+RAG_TOP_K=6
+RAG_EMBEDDING_PROVIDER=sentence-transformers
+RAG_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+RAG_USE_FAISS=true
+```
+
+For OpenAI embeddings, set:
+
+```bash
+OPENAI_API_KEY=your_openai_key
+RAG_EMBEDDING_PROVIDER=openai
+RAG_EMBEDDING_MODEL=text-embedding-3-small
 ```
 
 For Ollama Cloud:
@@ -343,7 +364,8 @@ Backend:
 ```bash
 cd backend
 .venv\Scripts\activate
-python -m py_compile agent.py main.py server.py settings.py utils.py schema.py documents.py company_search.py resume_rag.py
+python -m py_compile agent.py main.py server.py settings.py utils.py schema.py documents.py company_search.py resume_rag.py evaluate_retrieval.py
+python evaluate_retrieval.py --top-k 3
 ```
 
 Frontend:
@@ -361,5 +383,5 @@ npm run build
 - The generated frontend state is stored in browser session storage for navigation convenience.
 - Company research depends on public DuckDuckGo HTML results and can fail or return sparse snippets.
 - Local Ollama performance depends heavily on model size and available CPU/GPU resources.
-- Resume RAG is local and lightweight; it does not require a vector database.
+- Resume RAG can run token-only, semantic-only, or hybrid. FAISS is used when available; otherwise semantic search falls back to exact in-memory cosine similarity.
 - Free or hosted model APIs can improve latency, but review provider privacy terms before sending resumes or personal data.
