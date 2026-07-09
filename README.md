@@ -1,6 +1,6 @@
-# JobCopilot
+# CareerCopilot
 
-JobCopilot is a resume-aware job application assistant. It accepts a resume and job description, extracts and structures the candidate profile, researches the target company, retrieves relevant resume evidence, scores skill fit, writes a tailored cover letter, and opens a follow-up chat workspace for revisions.
+CareerCopilot is a resume-aware job application assistant. It accepts a resume and job description, extracts and structures the candidate profile, researches the target company, retrieves relevant resume evidence, scores skill fit, writes a tailored cover letter, and opens a follow-up chat workspace for revisions.
 
 The app is built with a FastAPI backend, a static-export Next.js frontend, LangGraph orchestration, LangChain Ollama integration, and lightweight local resume retrieval.
 
