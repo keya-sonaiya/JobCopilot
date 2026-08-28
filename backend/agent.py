@@ -862,6 +862,14 @@ class ResumeJobApplicationSystem:
 
     def finalize_application_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Finalize the application process"""
+        if state["errors"]:
+            state["current_step"] = "application_failed"
+            message = "Application processing stopped because one or more required steps failed."
+            self._emit_progress(state, "finalize", "failed", message)
+            state["messages"] = state.get("messages", []) + [AIMessage(content=f"❌ {message}")]
+            print(f"❌ {message}")
+            return state
+
         state["current_step"] = "application_completed"
         self._emit_progress(state, "finalize", "completed", "Application response is ready.")
         final_message = AIMessage(content="🎉 Application processing completed with Ollama + Pydantic validation!")

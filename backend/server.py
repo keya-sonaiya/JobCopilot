@@ -254,6 +254,15 @@ def run_application_job(
             progress_callback=lambda key, status, message: update_step(job_id, key, status, message),
         )
         application_response = build_application_response(result).model_dump(mode="json")
+        if result.errors:
+            update_job(
+                job_id,
+                status="failed",
+                error="; ".join(result.errors),
+                result=application_response,
+            )
+            return
+
         update_job(
             job_id,
             status="completed",
