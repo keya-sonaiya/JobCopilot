@@ -17,3 +17,6 @@ frontend/.next/
 frontend/out/
 frontend/.env*
 frontend/*.tsbuildinfo
+
+*-server.log
+*-server.err.log

@@ -159,7 +159,7 @@ Create `backend/.env`:
 ```bash
 OLLAMA_API_KEY=
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=gemma3:27b
+OLLAMA_MODEL=gemma4:31b
 ```
 
 Hybrid retrieval is configurable through the same file:
@@ -280,7 +280,7 @@ Returns service status and active Ollama configuration.
 ```json
 {
   "status": "ok",
-  "model": "gemma3:27b",
+  "model": "gemma4:31b",
   "host": "http://localhost:11434"
 }
 ```

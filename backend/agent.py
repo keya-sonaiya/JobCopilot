@@ -26,7 +26,7 @@ class ResumeJobApplicationSystem:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemma3:27b",
+        model: str = "gemma4:31b",
         host: Optional[str] = "http://localhost:11434",
         rag_config: Optional[ResumeRAGConfig] = None,
     ):
@@ -35,7 +35,7 @@ class ResumeJobApplicationSystem:
 
         Args:
             api_key: Optional Ollama API key for cloud or authenticated hosts
-            model: Ollama model to use (default: gemma3:27b)
+            model: Ollama model to use (default: gemma4:31b)
             host: Ollama host/base URL (default: http://localhost:11434)
         """
         self.rag_config = rag_config or ResumeRAGConfig.from_env()
@@ -798,6 +798,14 @@ class ResumeJobApplicationSystem:
 
     def finalize_application_node(self, state: LangGraphApplicationState) -> LangGraphApplicationState:
         """Finalize the application process"""
+        if state["errors"]:
+            state["current_step"] = "application_failed"
+            message = "Application processing stopped because one or more required steps failed."
+            self._emit_progress(state, "finalize", "failed", message)
+            state["messages"] = state.get("messages", []) + [AIMessage(content=f"❌ {message}")]
+            print(f"❌ {message}")
+            return state
+
         state["current_step"] = "application_completed"
         self._emit_progress(state, "finalize", "completed", "Application response is ready.")
         final_message = AIMessage(content="🎉 Application processing completed with Ollama + Pydantic validation!")
