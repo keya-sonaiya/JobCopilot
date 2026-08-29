@@ -1,0 +1,12 @@
+Maya Patel
+AI/ML Engineer
+maya.patel@example.com | Ahmedabad, Gujarat
+
+Experience:
+AI/ML Intern, Sparks To Ideas
+- Built a probabilistic forecasting pipeline with conformal prediction.
+- Developed an Adaptive Research Agent using Python, LangGraph, SSE, and SQLite.
+- Created REST APIs with FastAPI and used GitHub for version control.
+
+Skills: Python, Machine Learning, NumPy, Pandas, Scikit-learn, data preprocessing, feature engineering, SQL, SQLite, Git, GitHub, REST APIs, FastAPI, LangGraph, RAG
+Education: B.Tech in Computer Science and Engineering

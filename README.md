@@ -159,7 +159,7 @@ Create `backend/.env`:
 ```bash
 OLLAMA_API_KEY=
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=gemma4:31b
+OLLAMA_MODEL=gpt-oss:120b
 ```
 
 Hybrid retrieval is configurable through the same file:

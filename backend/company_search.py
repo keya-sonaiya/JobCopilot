@@ -85,6 +85,9 @@ class CompanySearcher:
             if not href or not title:
                 continue
 
+            if self._is_likely_personal_github_pages_url(href):
+                continue
+
             try:
                 results.append(
                     CompanySearchResult(
@@ -118,3 +121,9 @@ class CompanySearcher:
             return unquote(query["uddg"][0])
 
         return href
+
+    @staticmethod
+    def _is_likely_personal_github_pages_url(url: str) -> bool:
+        """Treat GitHub Pages subdomains as unverified personal/project sites."""
+        hostname = (urlparse(url).hostname or "").lower().rstrip(".")
+        return hostname.endswith(".github.io")

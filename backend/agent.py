@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Callable, Dict, List, Any, Optional, Iterable
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -47,7 +48,7 @@ class ResumeJobApplicationSystem:
             model=model,
             base_url=host,
             client_kwargs=client_kwargs or None,
-            num_predict=2048,
+            num_predict=4096,
             temperature=0,
             timeout=200,
         )
@@ -79,6 +80,51 @@ class ResumeJobApplicationSystem:
         if len(text) <= max_length:
             return text
         return text[:max_length].rstrip() + "\n...[truncated]"
+
+    @staticmethod
+    def _unsupported_numeric_claims(text: str, evidence: str) -> List[str]:
+        """Find quantified claims in generated prose that are absent from the evidence."""
+        generated_numbers = set(re.findall(r"(?<![\w-])\d+(?:\.\d+)?(?:\s?%|\s?x)?", text.lower()))
+        evidence_numbers = set(re.findall(r"(?<![\w-])\d+(?:\.\d+)?(?:\s?%|\s?x)?", evidence.lower()))
+        return sorted(generated_numbers - evidence_numbers)
+
+    @classmethod
+    def _validate_grounded_cover_letter(
+        cls,
+        cover_letter: Dict[str, Any],
+        resume: ParsedResume,
+        job: ParsedJobDescription,
+        resume_rag_context: Optional[str],
+        company_research_text: Optional[str],
+    ) -> None:
+        letter_text = " ".join(
+            str(cover_letter.get(field, ""))
+            for field in ("opening", "story_paragraph", "skills_paragraph", "culture_fit", "closing")
+        )
+        evidence = " ".join(
+            [
+                resume.model_dump_json(),
+                resume_rag_context or "",
+                company_research_text or "",
+            ]
+        )
+        unsupported_numbers = cls._unsupported_numeric_claims(letter_text, evidence)
+        if unsupported_numbers:
+            raise ValueError(
+                "Cover letter contains unsupported numeric claims: "
+                + ", ".join(unsupported_numbers)
+                + ". Use only metrics explicitly present in the resume or retrieved evidence."
+            )
+
+        if not company_research_text:
+            company_name = cls._company_reference(job.company.name)
+            company_claim_terms = r"mission|culture|values|product|roadmap|forefront|commitment|technical excellence"
+            company_claim_pattern = rf"\b{re.escape(company_name)}\b.{{0,160}}\b(?:{company_claim_terms})\b"
+            if re.search(company_claim_pattern, letter_text, flags=re.IGNORECASE):
+                raise ValueError(
+                    "Cover letter contains an unsupported company claim. "
+                    "No verified company research was available."
+                )
 
     @staticmethod
     def _fallback_chat_suggestions() -> List[str]:
@@ -733,6 +779,13 @@ class ResumeJobApplicationSystem:
                 company_research_text=state.get("company_research_text"),
             )
 
+            self._validate_grounded_cover_letter(
+                cover_letter,
+                resume,
+                job,
+                state.get("resume_rag_context"),
+                state.get("company_research_text"),
+            )
             validated_cover_letter = CoverLetter.model_validate(cover_letter)
 
             state["cover_letter"] = validated_cover_letter
@@ -774,6 +827,17 @@ class ResumeJobApplicationSystem:
                 )
 
                 # Validate the answers
+                evidence = " ".join(
+                    [resume.model_dump_json(), state.get("resume_rag_context") or "", state.get("company_research_text") or ""]
+                )
+                for answer in answers:
+                    unsupported_numbers = self._unsupported_numeric_claims(answer.get("answer", ""), evidence)
+                    if unsupported_numbers:
+                        raise ValueError(
+                            "Recruiter answer contains unsupported numeric claims: "
+                            + ", ".join(unsupported_numbers)
+                        )
+
                 validated_answers = [RecruiterQuestion.model_validate(answer) for answer in answers]
 
                 state["recruiter_answers"] = validated_answers
@@ -1020,7 +1084,8 @@ class ResumeJobApplicationSystem:
         """Analyze skill matching using Ollama"""
 
         system_prompt = """You are an expert HR analyst specializing in skill matching and candidate assessment.
-        Analyze how well a candidate's skills match job requirements. Provide detailed scoring and recommendations."""
+        Analyze how well a candidate's skills match job requirements. Provide grounded scoring and recommendations.
+        Return complete valid JSON. Never stop mid-object, omit closing braces, or add markdown."""
 
         resume_skills = [
             {
@@ -1112,7 +1177,7 @@ class ResumeJobApplicationSystem:
             ]
         }}
 
-        Return only the JSON object, no additional text.
+        Return only the complete JSON object, no additional text. Ensure every array and object is closed before responding.
         """
 
         scoring_response = self._call_ollama(scoring_prompt, system_prompt)
@@ -1154,11 +1219,16 @@ class ResumeJobApplicationSystem:
                 Your mission: craft a cover letter that
                 1. Hooks the reader by naming a product/mission insight.
                 2. Delivers a TL;DR with top achievements.
-                3. Weaves a short narrative showing impact (with metrics).
+                3. Weaves a short narrative showing impact, using metrics only when they are explicitly evidenced.
                 4. Lists core skills tied to role requirements.
-                5. Connects personal values to company culture.
+                5. Connects personal values to the role without inventing company culture or mission details.
                 6. Closes with a confident call to action.
                 Ensure it scans well for ATS but reads naturally.
+                Grounding is mandatory: use only facts present in the parsed resume, retrieved resume excerpts,
+                job description, or verified company research. Never invent metrics, percentages, dates, employers,
+                job titles, responsibilities, technologies, achievements, experience duration, products, missions,
+                values, customers, or company claims. If a result is not quantified in the evidence, describe it
+                without a number. If company research is unavailable, do not make company-specific factual claims.
                 """
 
         top_skills = [
@@ -1197,9 +1267,9 @@ class ResumeJobApplicationSystem:
             "header": "{resume.personal_info.name} | {resume.personal_info.email} | {resume.personal_info.location}\\n{today}",
             "tldr": "• {resume.get_total_experience_years()} yrs experience • Top skills: {", ".join(top_skills)} • Recent: {recent.position if recent else "N/A"} at {recent.company if recent else "N/A"}",
             "opening": "2-3 sentences. Start with a specific insight about {company_name} or, if the company is not named, the AI infrastructure/MLOps domain. Mention the {job.position} role by name.",
-            "story_paragraph": "3-4 sentences. Describe a past project where you delivered X (metric) that maps directly to a core responsibility: {core_responsibility}.",
-            "skills_paragraph": "3-4 sentences. Call out your top 3-5 skills ({", ".join(top_skills)}) and how each will solve a key challenge for {company_name}. Include one numeric result per skill.",
-            "culture_fit": "2-3 sentences. Explain why {company_name}'s mission, values, or technical domain resonates with your career goals.",
+            "story_paragraph": "3-4 sentences. Describe a past project from the evidence that maps directly to a core responsibility: {core_responsibility}. Include a metric only if the evidence contains that exact metric.",
+            "skills_paragraph": "3-4 sentences. Call out your top 3-5 evidenced skills ({", ".join(top_skills)}) and connect them to the role. Do not add numeric results unless explicitly evidenced.",
+            "culture_fit": "2-3 sentences. Explain fit with the role or domain. Mention company mission, values, products, or culture only when supported by verified company research.",
             "closing": "2 sentences. Express enthusiasm, request next steps, and thank the reader.",
             "signature": "Best regards,\n{resume.personal_info.name}"
         }}
@@ -1222,7 +1292,11 @@ class ResumeJobApplicationSystem:
         """Generate answers to recruiter questions using Ollama"""
 
         system_prompt = """You are an expert interview coach and career counselor. 
-        Generate thoughtful, professional answers to recruiter questions based on the candidate's background and the specific job opportunity."""
+        Generate thoughtful, professional answers to recruiter questions based on the candidate's background and the specific job opportunity.
+        Grounding is mandatory: use only facts present in the candidate profile, retrieved resume excerpts, job description,
+        or verified company research. Never invent metrics, employers, dates, job titles, responsibilities, technologies,
+        achievements, experience duration, company products, missions, values, or culture. If a fact is unknown, say so
+        or answer without that detail. Never present an estimate as a fact."""
 
         candidate_context = {
             "name": resume.personal_info.name,
@@ -1274,11 +1348,12 @@ class ResumeJobApplicationSystem:
 
         Guidelines for answers:
         - Be specific and reference actual experience/skills
-        - Show genuine interest in the role/company
+        - Show interest in the role; mention company-specific facts only when supported by the provided research
         - Be confident but not arrogant
         - Keep answers concise but informative
         - Use the STAR method for experience questions
         - Be honest about salary expectations and availability
+        - Include metrics only when they appear in the provided evidence; otherwise omit them
 
         Return only the JSON array, no additional text.
         """
